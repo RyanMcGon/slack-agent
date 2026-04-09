@@ -1,0 +1,20 @@
+{
+  "name": "slacktask-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "TaskLaunchpad - Conversational Slack agent for task management",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test src/**/*.test.js"
+  },
+  "dependencies": {
+    "@langchain/core": "^0.3.0",
+    "@langchain/langgraph": "^0.2.0",
+    "@langchain/langgraph-checkpoint-postgres": "^0.0.1",
+    "@langchain/openai": "^0.3.0",
+    "@slack/bolt": "^4.1.0",
+    "@supabase/supabase-js": "^2.47.0",
+    "dotenv": "^17.4.1"
+  }
+}
