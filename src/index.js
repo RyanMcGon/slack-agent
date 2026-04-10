@@ -3,7 +3,7 @@ import pkg from '@slack/bolt';
 const { App } = pkg;
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import { createGraph, initCheckpointer } from './graph.js';
-import { markTaskDone, allTools, lookupUserByEmail } from './tools.js';
+import { markTaskDone, allTools } from './tools.js';
 import {
   getUserEmail,
   buildConfirmationBlocks,
@@ -33,14 +33,12 @@ async function initGraph() {
 
 // --- Core: Invoke Graph ---
 
-async function invokeAgent({ messages, threadTs, channelId, userEmail, userRole, userId, say }) {
+async function invokeAgent({ messages, threadTs, channelId, userEmail, say }) {
   const currentDate = new Date().toISOString();
   const config = {
     configurable: {
       thread_id: threadTs,
       userEmail,
-      userRole: userRole || 'Internal',
-      userId: userId || null,
       currentDate,
     },
   };
@@ -106,9 +104,6 @@ app.command('/taskagent', async ({ command, ack, client, say }) => {
 
   try {
     const userEmail = await getUserEmail(client, userId);
-    const dbUser = await lookupUserByEmail(userEmail);
-    const userRole = dbUser?.role || 'Internal';
-    const dbUserId = dbUser?.id || null;
 
     // Try posting to channel first; if bot isn't in the channel, use ephemeral + DM fallback
     let threadTs;
@@ -121,7 +116,7 @@ app.command('/taskagent', async ({ command, ack, client, say }) => {
       threadTs = thinkingMsg.ts;
       replyFn = (msg) => client.chat.postMessage({ channel: channelId, ...msg });
 
-      await invokeAgent({ messages: [new HumanMessage(text)], threadTs, channelId, userEmail, userRole, userId: dbUserId, say: replyFn });
+      await invokeAgent({ messages: [new HumanMessage(text)], threadTs, channelId, userEmail, say: replyFn });
 
       // Clean up thinking message
       try { await client.chat.delete({ channel: channelId, ts: thinkingMsg.ts }); } catch {}
@@ -134,7 +129,7 @@ app.command('/taskagent', async ({ command, ack, client, say }) => {
       replyFn = (msg) => client.chat.postMessage({ channel: dmChannel, ...msg });
 
       await replyFn({ text: '🤔 Thinking...' });
-      await invokeAgent({ messages: [new HumanMessage(text)], threadTs, channelId: dmChannel, userEmail, userRole, userId: dbUserId, say: replyFn });
+      await invokeAgent({ messages: [new HumanMessage(text)], threadTs, channelId: dmChannel, userEmail, say: replyFn });
     }
   } catch (err) {
     console.error(JSON.stringify({ event: 'slash_command_error', error: err.message }));
@@ -156,9 +151,6 @@ app.message(async ({ message, client, say }) => {
 
   const threadTs = resolveThreadTs(message);
   const userEmail = await getUserEmail(client, message.user);
-  const dbUser = await lookupUserByEmail(userEmail);
-  const userRole = dbUser?.role || 'Internal';
-  const dbUserId = dbUser?.id || null;
 
   // Post "Thinking..." indicator
   const thinkingMsg = await say({ text: '🤔 Thinking...', thread_ts: threadTs });
@@ -168,8 +160,6 @@ app.message(async ({ message, client, say }) => {
     threadTs,
     channelId: message.channel,
     userEmail,
-    userRole,
-    userId: dbUserId,
     say,
   });
 
@@ -190,9 +180,6 @@ app.event('app_mention', async ({ event, client, say }) => {
 
   const threadTs = resolveThreadTs(event);
   const userEmail = await getUserEmail(client, event.user);
-  const dbUser = await lookupUserByEmail(userEmail);
-  const userRole = dbUser?.role || 'Internal';
-  const dbUserId = dbUser?.id || null;
 
   // Post "Thinking..." indicator
   const thinkingMsg = await say({ text: '🤔 Thinking...', thread_ts: threadTs });
@@ -202,8 +189,6 @@ app.event('app_mention', async ({ event, client, say }) => {
     threadTs,
     channelId: event.channel,
     userEmail,
-    userRole,
-    userId: dbUserId,
     say,
   });
 

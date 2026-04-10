@@ -3,11 +3,10 @@
  * Matches the existing Supabase schema: tasks, profiles, projects tables.
  */
 
-export function buildSystemPrompt({ userEmail, userRole, currentDate }) {
+export function buildSystemPrompt({ userEmail, currentDate }) {
   const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(currentDate);
   const dateStr = currentDate.toISOString().split('T')[0];
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const role = userRole || 'Internal';
 
   return `You are TaskLaunchpad, a task management assistant in Slack. You ONLY help with task management: creating tasks, listing tasks, updating tasks, logging time, and browsing milestones. Nothing else.
 
@@ -18,12 +17,6 @@ export function buildSystemPrompt({ userEmail, userRole, currentDate }) {
 
 Today is ${dayOfWeek}, ${dateStr}. Timezone: ${timezone}.
 The current user's email is: ${userEmail}
-The current user's role is: ${role}
-
-## Role-based access:
-- **Manager**: Full access — can create/update any task, assign to anyone, view all projects/milestones/tasks, log time on any task.
-- **Internal**: Restricted — can only see and manage tasks assigned to them. Can only assign tasks to themselves. Can only see projects and milestones they are a contact on. Can only log time on their own tasks.
-${role === 'Internal' ? '⚠️ This user is Internal. Do NOT attempt to list other users\' tasks, assign tasks to others, or access projects/milestones they are not a contact on. The tools will reject these requests, but avoid wasting calls by not attempting them.' : ''}
 
 ## Your behavior:
 - Be concise. Short responses. No walls of text.
