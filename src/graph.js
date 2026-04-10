@@ -86,10 +86,9 @@ function repairMessageHistory(messages) {
 // --- Graph Nodes ---
 
 async function agentNode(state, config) {
-  const { userEmail, userRole, currentDate } = config.configurable || {};
+  const { userEmail, currentDate } = config.configurable || {};
   const systemPrompt = buildSystemPrompt({
     userEmail: userEmail || 'unknown',
-    userRole: userRole || 'Internal',
     currentDate: currentDate ? new Date(currentDate) : new Date(),
   });
 
@@ -196,10 +195,9 @@ async function executeToolNode(state, config) {
 
 async function formatResponseNode(state, config) {
   // Feed tool result back to LLM for a friendly confirmation message
-  const { userEmail, userRole, currentDate } = config.configurable || {};
+  const { userEmail, currentDate } = config.configurable || {};
   const systemPrompt = buildSystemPrompt({
     userEmail: userEmail || 'unknown',
-    userRole: userRole || 'Internal',
     currentDate: currentDate ? new Date(currentDate) : new Date(),
   });
 

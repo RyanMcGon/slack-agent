@@ -69,7 +69,7 @@ export async function lookupUserByName(name) {
  * For Internal users, only returns milestones they're a contact on.
  * Returns an array (empty if none found).
  */
-export async function lookupMilestonesByProject(projectId, searchTerm = null, { userRole, userId } = {}) {
+export async function lookupMilestonesByProject(projectId, searchTerm = null) {
   let query = supabase
     .from('milestones')
     .select('id, summary, number, status, start_date, completion_date')
@@ -78,13 +78,6 @@ export async function lookupMilestonesByProject(projectId, searchTerm = null, { 
 
   if (searchTerm) {
     query = query.ilike('summary', `%${searchTerm}%`);
-  }
-
-  // Internal users can only see milestones they're assigned to
-  if (userRole === 'Internal' && userId) {
-    const allowedIds = await getMilestoneIdsForUser(userId);
-    if (allowedIds.length === 0) return [];
-    query = query.in('id', allowedIds);
   }
 
   const { data, error } = await query;
@@ -97,20 +90,11 @@ export async function lookupMilestonesByProject(projectId, searchTerm = null, { 
  * For Internal users, only returns projects they're a contact on.
  * Returns null if not found.
  */
-export async function lookupProjectByName(projectName, { userRole, userId } = {}) {
-  let query = supabase
+export async function lookupProjectByName(projectName) {
+  const { data, error } = await supabase
     .from('projects')
     .select('id, name')
     .ilike('name', `%${projectName}%`);
-
-  // Internal users can only see projects they're assigned to
-  if (userRole === 'Internal' && userId) {
-    const allowedIds = await getProjectIdsForUser(userId);
-    if (allowedIds.length === 0) return null;
-    query = query.in('id', allowedIds);
-  }
-
-  const { data, error } = await query;
 
   if (error || !data || data.length === 0) return null;
   if (data.length === 1) return data[0];
@@ -127,9 +111,6 @@ export async function lookupProjectByName(projectName, { userRole, userId } = {}
 export const createTask = tool(
   async ({ name, description, due_date, priority, assignee_email, project_name, milestone_name, status, task_type }, config) => {
     const creatorEmail = config?.configurable?.userEmail;
-    const userRole = config?.configurable?.userRole || 'Internal';
-    const userId = config?.configurable?.userId;
-    const roleCtx = { userRole, userId };
 
     // Resolve assignee email → UUID
     let assignedTo = null;
@@ -137,10 +118,6 @@ export const createTask = tool(
       const user = await lookupUserByEmail(assignee_email);
       if (!user) {
         return JSON.stringify({ error: `Could not find user with email: ${assignee_email}` });
-      }
-      // Internal users can only assign to themselves
-      if (userRole === 'Internal' && user.id !== userId) {
-        return JSON.stringify({ error: 'You can only assign tasks to yourself.' });
       }
       assignedTo = user.id;
     }
@@ -156,9 +133,9 @@ export const createTask = tool(
     if (!project_name) {
       return JSON.stringify({ error: 'A project is required to create a task.' });
     }
-    const project = await lookupProjectByName(project_name, roleCtx);
+    const project = await lookupProjectByName(project_name);
     if (!project) {
-      return JSON.stringify({ error: `Could not find project "${project_name}" in the database. Please check the project name or you may not have access to it.` });
+      return JSON.stringify({ error: `Could not find project "${project_name}" in the database. Please check the project name and try again.` });
     }
     if (Array.isArray(project)) {
       return JSON.stringify({
@@ -172,11 +149,11 @@ export const createTask = tool(
     if (!milestone_name) {
       return JSON.stringify({ error: 'A milestone is required to create a task.' });
     }
-    const milestoneMatches = await lookupMilestonesByProject(projectId, milestone_name, roleCtx);
+    const milestoneMatches = await lookupMilestonesByProject(projectId, milestone_name);
     let milestoneId = null;
     if (milestoneMatches.length === 0) {
       // No match — return all milestones for this project so the user can pick
-      const allMilestones = await lookupMilestonesByProject(projectId, null, roleCtx);
+      const allMilestones = await lookupMilestonesByProject(projectId);
       return JSON.stringify({
         error: `Could not find milestone "${milestone_name}" in project "${project.name}". It may not exist or the name is incorrect.`,
         available_milestones: allMilestones.map(m => ({ number: m.number, summary: m.summary })),
@@ -262,11 +239,7 @@ export const createTask = tool(
  * Defaults to current user's incomplete tasks.
  */
 export const listTasks = tool(
-  async ({ assignee_email, status, due_before, due_after, project_name, limit }, config) => {
-    const userRole = config?.configurable?.userRole || 'Internal';
-    const userId = config?.configurable?.userId;
-    const roleCtx = { userRole, userId };
-
+  async ({ assignee_email, status, due_before, due_after, project_name, limit }) => {
     let query = supabase
       .from('tasks')
       .select(`
@@ -276,11 +249,7 @@ export const listTasks = tool(
         project:projects!project_id(name)
       `);
 
-    // Internal users can only see their own tasks
-    if (userRole === 'Internal' && userId) {
-      query = query.eq('assigned_to', userId);
-    } else if (assignee_email) {
-      // Resolve assignee email → UUID for filtering
+    if (assignee_email) {
       const user = await lookupUserByEmail(assignee_email);
       if (user) {
         query = query.eq('assigned_to', user.id);
@@ -308,7 +277,7 @@ export const listTasks = tool(
 
     // Resolve project name → UUID for filtering
     if (project_name) {
-      const project = await lookupProjectByName(project_name, roleCtx);
+      const project = await lookupProjectByName(project_name);
       if (project && !Array.isArray(project)) {
         query = query.eq('project_id', project.id);
       } else if (Array.isArray(project)) {
@@ -369,21 +338,9 @@ export const listTasks = tool(
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const updateTask = tool(
-  async ({ task_id, name, description, due_date, priority, assignee_email, project_name, status }, config) => {
-    const userRole = config?.configurable?.userRole || 'Internal';
-    const userId = config?.configurable?.userId;
-    const roleCtx = { userRole, userId };
-
+  async ({ task_id, name, description, due_date, priority, assignee_email, project_name, status }) => {
     if (!UUID_RE.test(task_id)) {
       return JSON.stringify({ error: `"${task_id}" is not a valid UUID. Use list_tasks first to find the task's UUID "id" field — do not use the task number.` });
-    }
-
-    // Internal users can only update their own tasks
-    if (userRole === 'Internal' && userId) {
-      const { data: task } = await supabase.from('tasks').select('assigned_to').eq('id', task_id).single();
-      if (!task || task.assigned_to !== userId) {
-        return JSON.stringify({ error: 'You can only update tasks assigned to you.' });
-      }
     }
 
     const updates = {};
@@ -399,16 +356,12 @@ export const updateTask = tool(
       if (!user) {
         return JSON.stringify({ error: `Could not find user with email: ${assignee_email}` });
       }
-      // Internal users can only assign to themselves
-      if (userRole === 'Internal' && user.id !== userId) {
-        return JSON.stringify({ error: 'You can only assign tasks to yourself.' });
-      }
       updates.assigned_to = user.id;
     }
 
     // Resolve project name → UUID
     if (project_name != null) {
-      const project = await lookupProjectByName(project_name, roleCtx);
+      const project = await lookupProjectByName(project_name);
       if (!project) {
         return JSON.stringify({ error: `Could not find project: ${project_name}` });
       }
@@ -501,12 +454,8 @@ export async function markTaskDone(taskId) {
  * list_milestones — Fetch milestones for a project, with optional keyword search.
  */
 export const listMilestones = tool(
-  async ({ project_name, search_term }, config) => {
-    const userRole = config?.configurable?.userRole || 'Internal';
-    const userId = config?.configurable?.userId;
-    const roleCtx = { userRole, userId };
-
-    const project = await lookupProjectByName(project_name, roleCtx);
+  async ({ project_name, search_term }) => {
+    const project = await lookupProjectByName(project_name);
     if (!project) {
       return JSON.stringify({ error: `Could not find project: ${project_name}` });
     }
@@ -517,7 +466,7 @@ export const listMilestones = tool(
       });
     }
 
-    const milestones = await lookupMilestonesByProject(project.id, search_term || null, roleCtx);
+    const milestones = await lookupMilestonesByProject(project.id, search_term || null);
 
     if (milestones.length === 0) {
       return JSON.stringify({
@@ -554,19 +503,8 @@ export const listMilestones = tool(
  */
 export const logTime = tool(
   async ({ task_id, time_logged, time_summary, description, type, sub_type, billable, logged_at }, config) => {
-    const userRole = config?.configurable?.userRole || 'Internal';
-    const userId = config?.configurable?.userId;
-
     if (!UUID_RE.test(task_id)) {
       return JSON.stringify({ error: `"${task_id}" is not a valid UUID. Use list_tasks first to find the task's UUID "id" field — do not use the task number.` });
-    }
-
-    // Internal users can only log time on their own tasks
-    if (userRole === 'Internal' && userId) {
-      const { data: task } = await supabase.from('tasks').select('assigned_to').eq('id', task_id).single();
-      if (!task || task.assigned_to !== userId) {
-        return JSON.stringify({ error: 'You can only log time on tasks assigned to you.' });
-      }
     }
 
     const creatorEmail = config?.configurable?.userEmail;
